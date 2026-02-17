@@ -1,0 +1,65 @@
+# redd - RedPivot Server Configuration
+# High-performance reverse proxy with anti-traffic-analysis features
+
+server:
+  # Server bind address
+  bind: "0.0.0.0:443"
+  # Domain for HTTP proxies
+  domain: "example.com"
+  # Connection timeouts in seconds
+  read_timeout: 30
+  write_timeout: 30
+
+# Authentication configuration
+auth:
+  # Authentication method: "token" or "mtls"
+  method: "token"
+  # List of valid tokens
+  tokens:
+    - "your-secret-token-here-change-me"
+    - "another-token-for-different-client"
+
+# Transport layer configuration
+transport:
+  # Transport type: "websocket", "quic", "grpc"
+  type: "websocket"
+
+  # WebSocket specific settings
+  websocket:
+    path: "/ws"
+    read_buffer_size: 65536
+    write_buffer_size: 65536
+
+  # TLS configuration
+  tls:
+    enabled: true
+    cert: "/etc/redd/cert.pem"
+    key: "/etc/redd/key.pem"
+    # CA certificate for client verification (optional)
+    # ca: "/etc/redd/ca.pem"
+
+  # QUIC specific settings (if using QUIC transport)
+  quic:
+    max_streams: 1000
+    max_idle_timeout: 60
+    keep_alive_period: 15
+
+# Anti-traffic-analysis obfuscation settings
+obfuscation:
+  enabled: true
+  # Probability of adding random padding (0.0 - 1.0)
+  padding_probability: 0.3
+  # Maximum timing jitter in milliseconds
+  timing_jitter_ms: 50
+  # Chunk size range for traffic normalization
+  chunk_min_size: 64
+  chunk_max_size: 1500
+
+# Logging configuration
+logging:
+  # Log level: "debug", "info", "warn", "error"
+  level: "info"
+  # Log format: "json" or "text"
+  format: "json"
+  # Output: "stdout", "stderr", or file path
+  output: "stdout"

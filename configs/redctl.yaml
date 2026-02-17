@@ -1,0 +1,63 @@
+# redctl - RedPivot Client Configuration
+# Connect to RedPivot server and expose local services
+
+# Client connection settings
+client:
+  # Server WebSocket URL
+  server: "wss://your-server.com:443/ws"
+  # Authentication token
+  token: "your-secret-token-here-change-me"
+
+  # Reconnection settings
+  reconnect:
+    enabled: true
+    max_attempts: 10
+    initial_delay: 1s
+    max_delay: 60s
+
+# Proxy definitions
+# Each proxy exposes a local service through the tunnel
+
+proxies:
+  # TCP Proxy - Expose SSH server
+  - name: "ssh"
+    type: "tcp"
+    local: "127.0.0.1:22"
+    remote_port: 6022
+
+  # TCP Proxy - Expose RDP
+  - name: "rdp"
+    type: "tcp"
+    local: "127.0.0.1:3389"
+    remote_port: 6389
+
+  # HTTP Proxy - Expose web application with subdomain
+  - name: "webapp"
+    type: "http"
+    local: "127.0.0.1:8080"
+    subdomain: "myapp"
+    # Accessible at: myapp.example.com
+
+  # HTTP Proxy - Expose another web service
+  - name: "api"
+    type: "http"
+    local: "127.0.0.1:3000"
+    subdomain: "api"
+
+  # UDP Proxy - Expose DNS server
+  - name: "dns"
+    type: "udp"
+    local: "127.0.0.1:53"
+    remote_port: 6053
+
+  # Secret TCP (STCP) - Requires visitor on another client
+  # - name: "secret-service"
+  #   type: "stcp"
+  #   local: "127.0.0.1:9000"
+  #   secret_key: "shared-secret-key"
+
+# Logging configuration
+logging:
+  level: "info"
+  format: "text"
+  output: "stdout"
