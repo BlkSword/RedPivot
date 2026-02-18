@@ -14,6 +14,7 @@ import (
 
 	"github.com/redpivot/redpivot/internal/client"
 	"github.com/redpivot/redpivot/internal/config"
+	"github.com/redpivot/redpivot/internal/config/wizard"
 	"github.com/redpivot/redpivot/internal/transport"
 	"github.com/redpivot/redpivot/internal/tunnel"
 	"github.com/redpivot/redpivot/pkg/protocol"
@@ -34,7 +35,12 @@ var (
 const helpText = `redctl - RedPivot Client
 
 Usage:
-  redctl [options]
+  redctl [command] [options]
+
+Commands:
+  (default)     启动客户端
+  config init   交互式生成配置文件
+  help          显示帮助信息
 
 Options:
   -config <path>   Path to configuration file (default: configs/redctl.yaml)
@@ -54,10 +60,44 @@ Examples:
   redctl -config configs/redctl.yaml
   redctl -verify -config configs/redctl.yaml
   redctl -diskless -env
-  echo "base64-config" | redctl -diskless -stdin
+  redctl config init
 `
 
+// runConfigInit runs the interactive configuration wizard
+func runConfigInit() {
+	cfg, savePath, err := wizard.RunClientWizard()
+	if err != nil {
+		fmt.Printf("\n配置生成失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := config.SaveClientConfig(cfg, savePath); err != nil {
+		fmt.Printf("\n保存配置失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("\n✓ 配置已保存到 %s\n", savePath)
+	wizard.PrintClientSummary(cfg)
+}
+
 func main() {
+	// Check for subcommands before flag parsing
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "config":
+			if len(os.Args) > 2 && os.Args[2] == "init" {
+				runConfigInit()
+				return
+			}
+			fmt.Println("用法: redctl config init")
+			fmt.Println("  交互式生成客户端配置文件")
+			os.Exit(1)
+		case "help", "-help", "--help":
+			fmt.Print(helpText)
+			os.Exit(0)
+		}
+	}
+
 	flag.Parse()
 
 	if *showHelp {

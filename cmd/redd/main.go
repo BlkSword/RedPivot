@@ -16,6 +16,7 @@ import (
 
 	"github.com/redpivot/redpivot/internal/auth"
 	"github.com/redpivot/redpivot/internal/config"
+	"github.com/redpivot/redpivot/internal/config/wizard"
 	"github.com/redpivot/redpivot/internal/countermeasure"
 	"github.com/redpivot/redpivot/internal/server"
 	"github.com/redpivot/redpivot/internal/transport"
@@ -35,7 +36,12 @@ var (
 const helpText = `redd - RedPivot Server
 
 Usage:
-  redd [options]
+  redd [command] [options]
+
+Commands:
+  (default)     启动服务端
+  config init   交互式生成配置文件
+  help          显示帮助信息
 
 Options:
   -config <path>   Path to configuration file (default: configs/redd.yaml)
@@ -46,7 +52,25 @@ Options:
 Examples:
   redd -config /etc/redd/config.yaml
   redd -verify -config configs/redd.yaml
+  redd config init
 `
+
+// runConfigInit runs the interactive configuration wizard
+func runConfigInit() {
+	cfg, savePath, err := wizard.RunServerWizard()
+	if err != nil {
+		fmt.Printf("\n配置生成失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := config.SaveServerConfig(cfg, savePath); err != nil {
+		fmt.Printf("\n保存配置失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("\n✓ 配置已保存到 %s\n", savePath)
+	wizard.PrintServerSummary(cfg)
+}
 
 // Server represents the RedPivot server
 type Server struct {
@@ -60,6 +84,23 @@ type Server struct {
 }
 
 func main() {
+	// Check for subcommands before flag parsing
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "config":
+			if len(os.Args) > 2 && os.Args[2] == "init" {
+				runConfigInit()
+				return
+			}
+			fmt.Println("用法: redd config init")
+			fmt.Println("  交互式生成服务端配置文件")
+			os.Exit(1)
+		case "help", "-help", "--help":
+			fmt.Print(helpText)
+			os.Exit(0)
+		}
+	}
+
 	flag.Parse()
 
 	if *showHelp {
