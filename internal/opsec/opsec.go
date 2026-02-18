@@ -18,10 +18,6 @@ type Config struct {
 	DebugDetectionLevel DebuggerDetectionLevel
 	OnDebugDetected     func()
 
-	// Sandbox
-	EnableSandboxCheck bool
-	OnSandboxDetected  func()
-
 	// Diskless
 	DisklessMode   bool
 	ConfigFromStdin bool
@@ -42,7 +38,6 @@ func DefaultConfig() *Config {
 		EnableMemoryProtection: true,
 		EnableAntiDebug:        false,
 		DebugDetectionLevel:    DetectionBasic,
-		EnableSandboxCheck:     false,
 		DisklessMode:           false,
 		LogMode:               LogModeNormal,
 		LogMaxSize:            1000,
@@ -55,7 +50,6 @@ func DefaultConfig() *Config {
 type Manager struct {
 	config      *Config
 	antiDebug   *AntiDebug
-	sandbox     *SandboxCheck
 	diskless    *DisklessMode
 	logger      *SecureLogger
 	secureCfg   *SecureConfig
@@ -79,10 +73,6 @@ func NewManager(cfg *Config) *Manager {
 		m.antiDebug = NewAntiDebug(cfg.DebugDetectionLevel)
 	}
 
-	if cfg.EnableSandboxCheck {
-		m.sandbox = NewSandboxCheck()
-	}
-
 	if cfg.DisklessMode {
 		m.diskless = NewDisklessMode()
 		if cfg.ConfigFromStdin {
@@ -100,16 +90,6 @@ func NewManager(cfg *Config) *Manager {
 
 // Initialize sets up all OPSEC protections
 func (m *Manager) Initialize() error {
-	// Check for sandbox first
-	if m.config.EnableSandboxCheck && m.sandbox != nil {
-		if m.sandbox.IsSandbox() {
-			if m.config.OnSandboxDetected != nil {
-				m.config.OnSandboxDetected()
-			}
-			// Optionally exit or continue with caution
-		}
-	}
-
 	// Start anti-debug monitoring
 	if m.config.EnableAntiDebug && m.antiDebug != nil {
 		m.antiDebug.Start(func() {
