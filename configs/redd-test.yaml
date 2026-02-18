@@ -1,0 +1,33 @@
+# redd 测试配置
+
+server:
+  bind: "0.0.0.0:7781"
+  domain: "localhost"
+  read_timeout: 30
+  write_timeout: 30
+
+auth:
+  method: "token"
+  tokens:
+    - "your-secret-token-here"
+
+transport:
+  type: "websocket"
+  websocket:
+    path: "/ws"
+    read_buffer_size: 65536
+    write_buffer_size: 65536
+  tls:
+    enabled: false
+
+obfuscation:
+  enabled: false
+  padding_probability: 0.3
+  timing_jitter_ms: 50
+  chunk_min_size: 64
+  chunk_max_size: 1500
+
+logging:
+  level: "debug"
+  format: "text"
+  output: "stdout"

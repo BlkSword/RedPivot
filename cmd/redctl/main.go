@@ -6,18 +6,17 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/redpivot/redpivot/internal/client"
 	"github.com/redpivot/redpivot/internal/config"
-	"github.com/redpivot/redpivot/internal/countermeasure"
-	"github.com/redpivot/redpivot/internal/proxy"
 	"github.com/redpivot/redpivot/internal/transport"
 	"github.com/redpivot/redpivot/internal/tunnel"
+	"github.com/redpivot/redpivot/pkg/protocol"
 	"github.com/redpivot/redpivot/pkg/utils"
 )
 
@@ -61,19 +60,17 @@ Examples:
 func main() {
 	flag.Parse()
 
-	// Handle help flag
 	if *showHelp {
 		fmt.Print(helpText)
 		os.Exit(0)
 	}
 
-	// Handle version flag
 	if *showVersion {
 		fmt.Printf("redctl version %s\n", version)
 		os.Exit(0)
 	}
 
-	// Load configuration based on mode
+	// Load configuration
 	var cfg *config.ClientConfig
 	var err error
 
@@ -95,7 +92,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Handle verify flag
 	if *verify {
 		fmt.Printf("Configuration is valid\n")
 		fmt.Printf("  Server: %s\n", cfg.Client.Server)
@@ -115,85 +111,50 @@ func main() {
 		utils.String("server", cfg.Client.Server),
 	)
 
-	// Initialize obfuscator
-	obfuscator := countermeasure.NewObfuscator(
-		true, // Enable obfuscation on client
-		0.3,  // 30% padding probability
-		50,   // 50ms timing jitter
-		64,   // Min chunk size
-		1500, // Max chunk size
-	)
-
 	// Create client
-	client := NewClient(cfg, obfuscator, logger)
+	c := NewClient(cfg, logger)
 
-	// Start proxies
-	if err := client.Start(); err != nil {
+	// Start
+	if err := c.Start(); err != nil {
 		logger.Fatal("Failed to start client", utils.Err(err))
 	}
 
-	// Wait for shutdown signal
+	// Wait for shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
 
 	logger.Info("Shutting down client...")
-	client.Stop()
+	c.Stop()
 	logger.Info("Client stopped")
 }
 
 // Client represents the RedPivot client
 type Client struct {
-	cfg        *config.ClientConfig
-	obfuscator *countermeasure.Obfuscator
-	logger     *utils.Logger
+	cfg    *config.ClientConfig
+	logger *utils.Logger
 
-	mux      *tunnel.Mux
-	ws       *transport.WebSocketTransport
-	proxies  []Proxy
-	mu       sync.Mutex
-	ctx      context.Context
-	cancel   context.CancelFunc
-}
-
-// Proxy interface for different proxy types
-type Proxy interface {
-	Start() error
-	Close() error
-	Name() string
-	Type() string
-}
-
-// MuxAdapter adapts tunnel.Mux to implement proxy.StreamPool
-type MuxAdapter struct {
-	mux *tunnel.Mux
-}
-
-// NewMuxAdapter creates a new mux adapter
-func NewMuxAdapter(mux *tunnel.Mux) *MuxAdapter {
-	return &MuxAdapter{mux: mux}
-}
-
-// OpenStream implements proxy.StreamPool
-func (a *MuxAdapter) OpenStream() (io.ReadWriteCloser, error) {
-	return a.mux.OpenStream()
+	mu           sync.Mutex
+	ctx          context.Context
+	cancel       context.CancelFunc
+	ws           *transport.WebSocketTransport
+	mux          *tunnel.Mux
+	proxyHandler *client.ProxyHandler
 }
 
 // NewClient creates a new client
-func NewClient(cfg *config.ClientConfig, obfuscator *countermeasure.Obfuscator, logger *utils.Logger) *Client {
+func NewClient(cfg *config.ClientConfig, logger *utils.Logger) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Client{
-		cfg:        cfg,
-		obfuscator: obfuscator,
-		logger:     logger,
-		ctx:        ctx,
-		cancel:     cancel,
+		cfg:    cfg,
+		logger: logger,
+		ctx:    ctx,
+		cancel: cancel,
 	}
 }
 
 // Start starts the client and connects to server
 func (c *Client) Start() error {
-	// Connect to server with retry
 	var lastErr error
 	for attempt := 0; attempt < c.cfg.Client.Reconnect.MaxAttempts; attempt++ {
 		if attempt > 0 {
@@ -214,8 +175,7 @@ func (c *Client) Start() error {
 			continue
 		}
 
-		// Connection successful
-		return c.startProxies()
+		return nil
 	}
 
 	return fmt.Errorf("failed to connect after %d attempts: %v",
@@ -226,7 +186,10 @@ func (c *Client) Start() error {
 func (c *Client) connect() error {
 	// WebSocket configuration
 	tlsConfig := &tls.Config{
-		InsecureSkipVerify: true, // In production, verify certificate
+		InsecureSkipVerify: c.cfg.Client.InsecureSkipVerify,
+	}
+	if tlsConfig.InsecureSkipVerify == false && os.Getenv("REDPIVOT_INSECURE") != "" {
+		tlsConfig.InsecureSkipVerify = true
 	}
 
 	wsConfig := &transport.WSConfig{
@@ -245,20 +208,62 @@ func (c *Client) connect() error {
 	// Wrap as ReadWriteCloser
 	rwc := transport.NewWSReadWriteCloser(ws)
 
-	// Create encrypted connection
-	key := make([]byte, 32)
-	copy(key, []byte("temporary-key-for-demo-purposes!"))
+	// Send authentication frame
+	authFrame := protocol.NewFrame(protocol.FrameAuth, 0, []byte(c.cfg.Client.Token))
+	if _, err := rwc.Write(authFrame.Encode()); err != nil {
+		ws.Close()
+		return fmt.Errorf("failed to send auth frame: %w", err)
+	}
 
-	crypto, err := tunnel.NewCryptoLayer(key)
+	// Wait for auth response
+	respFrame, err := protocol.DecodeFrame(rwc)
 	if err != nil {
 		ws.Close()
-		return err
+		return fmt.Errorf("failed to read auth response: %w", err)
+	}
+
+	if respFrame.Type != protocol.FrameAuthResp {
+		ws.Close()
+		return fmt.Errorf("expected auth response, got %d", respFrame.Type)
+	}
+
+	// Check if authentication succeeded
+	if len(respFrame.Payload) < 32 {
+		// Authentication failed - payload contains error message
+		errMsg := string(respFrame.Payload)
+		ws.Close()
+		return fmt.Errorf("authentication failed: %s", errMsg)
+	}
+
+	// Extract session key
+	sessionKey := respFrame.Payload[:32]
+	c.logger.Info("Authenticated successfully")
+
+	// Create encrypted connection with session key
+	crypto, err := tunnel.NewCryptoLayer(sessionKey)
+	if err != nil {
+		ws.Close()
+		return fmt.Errorf("failed to create crypto layer: %w", err)
 	}
 
 	encryptedConn := tunnel.NewEncryptedConn(rwc, crypto)
 
-	// Create multiplexer
-	c.mux = tunnel.NewMux(encryptedConn)
+	// Create multiplexer with stream handler for incoming connections
+	muxAdapter := &muxStreamOpener{}
+	c.mux = tunnel.NewMuxWithHandler(encryptedConn, func(stream *tunnel.Stream) {
+		c.handleStream(stream)
+	})
+	muxAdapter.mux = c.mux
+
+	// Create proxy handler
+	c.proxyHandler = client.NewProxyHandler(muxAdapter, c.logger)
+
+	// Register proxies with server
+	if err := c.proxyHandler.RegisterProxies(c.cfg.Proxies); err != nil {
+		c.mux.Close()
+		ws.Close()
+		return fmt.Errorf("failed to register proxies: %w", err)
+	}
 
 	// Set up reconnection handler
 	ws.OnClose(func() {
@@ -270,10 +275,20 @@ func (c *Client) connect() error {
 	return nil
 }
 
+// handleStream handles an incoming stream from server
+func (c *Client) handleStream(stream *tunnel.Stream) {
+	c.proxyHandler.HandleStream(stream)
+}
+
 // reconnect handles reconnection
 func (c *Client) reconnect() {
 	c.mu.Lock()
-	c.stopProxies()
+	if c.proxyHandler != nil {
+		c.proxyHandler.Close()
+	}
+	if c.mux != nil {
+		c.mux.Close()
+	}
 	c.mu.Unlock()
 
 	for {
@@ -288,104 +303,9 @@ func (c *Client) reconnect() {
 			continue
 		}
 
-		// Restart proxies
-		if err := c.startProxies(); err != nil {
-			c.logger.Error("Failed to restart proxies", utils.Err(err))
-			continue
-		}
-
 		c.logger.Info("Reconnected successfully")
 		return
 	}
-}
-
-// startProxies starts all configured proxies
-func (c *Client) startProxies() error {
-	muxAdapter := NewMuxAdapter(c.mux)
-
-	for _, proxyCfg := range c.cfg.Proxies {
-		var p Proxy
-
-		switch proxyCfg.Type {
-		case "tcp":
-			p = proxy.NewTCPProxy(
-				proxyCfg.Name,
-				proxyCfg.Local,
-				uint16(proxyCfg.RemotePort),
-			)
-			p.(*proxy.TCPProxy).SetStreamPool(muxAdapter)
-
-		case "udp":
-			p = proxy.NewUDPProxy(
-				proxyCfg.Name,
-				proxyCfg.Local,
-				uint16(proxyCfg.RemotePort),
-			)
-			p.(*proxy.UDPProxy).SetStreamPool(muxAdapter)
-
-		case "http":
-			p = proxy.NewHTTPProxy(
-				proxyCfg.Name,
-				proxyCfg.Subdomain,
-				"", // Domain from server
-			)
-
-		case "https":
-			p = proxy.NewHTTPSProxy(
-				proxyCfg.Name,
-				proxyCfg.Subdomain,
-				proxyCfg.Local,
-				proxyCfg.CertFile,
-				proxyCfg.KeyFile,
-			)
-			p.(*proxy.HTTPSProxy).SetStreamPool(muxAdapter)
-
-		case "stcp":
-			p = proxy.NewTCPProxy(
-				proxyCfg.Name,
-				proxyCfg.Local,
-				uint16(proxyCfg.RemotePort),
-			)
-			p.(*proxy.TCPProxy).SetStreamPool(muxAdapter)
-			c.logger.Info("STCP proxy configured",
-				utils.String("name", proxyCfg.Name),
-				utils.Any("has_secret", proxyCfg.SecretKey != ""),
-			)
-
-		default:
-			c.logger.Warn("Unknown proxy type",
-				utils.String("name", proxyCfg.Name),
-				utils.String("type", proxyCfg.Type),
-			)
-			continue
-		}
-
-		if err := p.Start(); err != nil {
-			c.logger.Error("Failed to start proxy",
-				utils.String("name", proxyCfg.Name),
-				utils.Err(err),
-			)
-			continue
-		}
-
-		c.proxies = append(c.proxies, p)
-		c.logger.Info("Proxy started",
-			utils.String("name", proxyCfg.Name),
-			utils.String("type", proxyCfg.Type),
-			utils.String("local", proxyCfg.Local),
-		)
-	}
-
-	return nil
-}
-
-// stopProxies stops all proxies
-func (c *Client) stopProxies() {
-	for _, p := range c.proxies {
-		p.Close()
-		c.logger.Info("Proxy stopped", utils.String("name", p.Name()))
-	}
-	c.proxies = nil
 }
 
 // Stop stops the client
@@ -394,12 +314,25 @@ func (c *Client) Stop() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.stopProxies()
-
+	if c.proxyHandler != nil {
+		c.proxyHandler.Close()
+	}
 	if c.mux != nil {
 		c.mux.Close()
 	}
 	if c.ws != nil {
 		c.ws.Close()
 	}
+}
+
+// muxStreamOpener adapts Mux to implement StreamOpener
+type muxStreamOpener struct {
+	mux *tunnel.Mux
+}
+
+func (m *muxStreamOpener) OpenStream() (client.Stream, error) {
+	if m.mux == nil {
+		return nil, fmt.Errorf("mux not initialized")
+	}
+	return m.mux.OpenStream()
 }

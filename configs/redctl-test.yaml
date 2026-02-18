@@ -1,0 +1,22 @@
+# redctl 测试配置
+
+client:
+  server: "ws://127.0.0.1:7781/ws"
+  token: "your-secret-token-here"
+  insecure_skip_verify: true
+  reconnect:
+    enabled: true
+    max_attempts: 3
+    initial_delay: 1s
+    max_delay: 5s
+
+proxies:
+  - name: "test-http"
+    type: "tcp"
+    local: "127.0.0.1:8080"
+    remote_port: 9080
+
+logging:
+  level: "debug"
+  format: "text"
+  output: "stdout"

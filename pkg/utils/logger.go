@@ -198,6 +198,11 @@ func Int64(key string, value int64) Field {
 	return F(key, value)
 }
 
+// Uint32 creates a uint32 field
+func Uint32(key string, value uint32) Field {
+	return F(key, value)
+}
+
 // Err creates an error field
 func Err(err error) Field {
 	return F("error", err.Error())

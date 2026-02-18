@@ -10,8 +10,8 @@ import (
 const (
 	MagicNumber    uint32 = 0x52454450 // "REDP"
 	Version        byte   = 1
-	HeaderSize     int    = 12
-	MaxPayloadSize uint16 = 32 * 1024 // 32KB - fits in uint16
+	HeaderSize     int    = 14          // 4(Magic) + 1(Ver) + 1(Type) + 1(Flags) + 1(Rsv) + 4(StreamID) + 2(Length)
+	MaxPayloadSize uint16 = 32 * 1024   // 32KB - fits in uint16
 )
 
 // FrameType represents the type of frame
@@ -62,6 +62,7 @@ func NewFrame(frameType FrameType, streamID uint32, payload []byte) *Frame {
 }
 
 // Encode serializes the frame to bytes
+// Frame format: Magic(4) + Version(1) + Type(1) + Flags(1) + Reserved(1) + StreamID(4) + Length(2) + Payload(N)
 func (f *Frame) Encode() []byte {
 	buf := make([]byte, HeaderSize+len(f.Payload))
 
@@ -77,17 +78,8 @@ func (f *Frame) Encode() []byte {
 	buf[7] = 0
 	// Stream ID (4 bytes)
 	binary.BigEndian.PutUint32(buf[8:12], f.StreamID)
-	// Length (2 bytes) - we overwrite bytes 10-11
-
-	// Rebuild with proper length position
-	buf = make([]byte, HeaderSize+len(f.Payload))
-	binary.BigEndian.PutUint32(buf[0:4], MagicNumber)
-	buf[4] = f.Version
-	buf[5] = byte(f.Type)
-	buf[6] = f.Flags
-	buf[7] = 0
-	binary.BigEndian.PutUint32(buf[8:12], f.StreamID)
-	binary.BigEndian.PutUint16(buf[10:12], f.Length)
+	// Length (2 bytes)
+	binary.BigEndian.PutUint16(buf[12:14], f.Length)
 
 	// Payload
 	if len(f.Payload) > 0 {
@@ -115,7 +107,7 @@ func DecodeFrame(r io.Reader) (*Frame, error) {
 		Type:     FrameType(header[5]),
 		Flags:    header[6],
 		StreamID: binary.BigEndian.Uint32(header[8:12]),
-		Length:   binary.BigEndian.Uint16(header[10:12]),
+		Length:   binary.BigEndian.Uint16(header[12:14]),
 	}
 
 	// Validate version
@@ -158,7 +150,7 @@ func DecodeFrameFromBytes(data []byte) (*Frame, error) {
 		Type:     FrameType(data[5]),
 		Flags:    data[6],
 		StreamID: binary.BigEndian.Uint32(data[8:12]),
-		Length:   binary.BigEndian.Uint16(data[10:12]),
+		Length:   binary.BigEndian.Uint16(data[12:14]),
 	}
 
 	if frame.Version != Version {

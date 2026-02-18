@@ -2,7 +2,9 @@ package protocol
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"errors"
+	"fmt"
 )
 
 // Message types for control plane
@@ -216,4 +218,123 @@ func DecodeProxy(data []byte) (*ProxyMessage, error) {
 	}
 
 	return m, nil
+}
+
+// ProxyAction defines proxy action types for JSON messages
+type ProxyAction string
+
+const (
+	ProxyActionRegister   ProxyAction = "register"
+	ProxyActionUnregister ProxyAction = "unregister"
+	ProxyActionSuccess    ProxyAction = "success"
+	ProxyActionError      ProxyAction = "error"
+	ProxyActionConnect    ProxyAction = "connect"
+	ProxyActionData       ProxyAction = "data"
+	ProxyActionClose      ProxyAction = "close"
+)
+
+// ProxyMessageType defines proxy type string for JSON messages
+type ProxyMessageType string
+
+const (
+	ProxyMessageTypeTCP   ProxyMessageType = "tcp"
+	ProxyMessageTypeUDP   ProxyMessageType = "udp"
+	ProxyMessageTypeHTTP  ProxyMessageType = "http"
+	ProxyMessageTypeHTTPS ProxyMessageType = "https"
+	ProxyMessageTypeSTCP  ProxyMessageType = "stcp"
+)
+
+// ProxyControlMessage represents a proxy control message (JSON encoded)
+type ProxyControlMessage struct {
+	Action     ProxyAction      `json:"action"`
+	Name       string           `json:"name,omitempty"`
+	Type       ProxyMessageType `json:"type,omitempty"`
+	LocalAddr  string           `json:"local_addr,omitempty"`
+	RemotePort uint16           `json:"remote_port,omitempty"`
+	Subdomain  string           `json:"subdomain,omitempty"`
+	SecretKey  string           `json:"secret_key,omitempty"`
+	ConnID     uint32           `json:"conn_id,omitempty"`
+	Data       []byte           `json:"data,omitempty"`
+	Error      string           `json:"error,omitempty"`
+}
+
+// EncodeJSON encodes the message as JSON
+func (m *ProxyControlMessage) EncodeJSON() ([]byte, error) {
+	return json.Marshal(m)
+}
+
+// DecodeProxyControlMessage decodes JSON to ProxyControlMessage
+func DecodeProxyControlMessage(data []byte) (*ProxyControlMessage, error) {
+	var msg ProxyControlMessage
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return nil, fmt.Errorf("failed to decode proxy message: %w", err)
+	}
+	return &msg, nil
+}
+
+// NewRegisterMessage creates a proxy registration message
+func NewRegisterMessage(name string, proxyType ProxyMessageType, remotePort uint16, localAddr, subdomain, secretKey string) *ProxyControlMessage {
+	return &ProxyControlMessage{
+		Action:     ProxyActionRegister,
+		Name:       name,
+		Type:       proxyType,
+		RemotePort: remotePort,
+		LocalAddr:  localAddr,
+		Subdomain:  subdomain,
+		SecretKey:  secretKey,
+	}
+}
+
+// NewUnregisterMessage creates a proxy unregister message
+func NewUnregisterMessage(name string) *ProxyControlMessage {
+	return &ProxyControlMessage{
+		Action: ProxyActionUnregister,
+		Name:   name,
+	}
+}
+
+// NewSuccessMessage creates a success response
+func NewSuccessMessage(name string) *ProxyControlMessage {
+	return &ProxyControlMessage{
+		Action: ProxyActionSuccess,
+		Name:   name,
+	}
+}
+
+// NewErrorMessage creates an error response
+func NewErrorMessage(name string, errMsg string) *ProxyControlMessage {
+	return &ProxyControlMessage{
+		Action: ProxyActionError,
+		Name:   name,
+		Error:  errMsg,
+	}
+}
+
+// NewConnectMessage creates a new connection notification (Server -> Client)
+func NewConnectMessage(name string, connID uint32, remoteAddr string) *ProxyControlMessage {
+	return &ProxyControlMessage{
+		Action:    ProxyActionConnect,
+		Name:      name,
+		ConnID:    connID,
+		LocalAddr: remoteAddr,
+	}
+}
+
+// NewDataMessage creates a data transfer message
+func NewDataMessage(name string, connID uint32, data []byte) *ProxyControlMessage {
+	return &ProxyControlMessage{
+		Action: ProxyActionData,
+		Name:   name,
+		ConnID: connID,
+		Data:   data,
+	}
+}
+
+// NewCloseMessage creates a connection close message
+func NewCloseMessage(name string, connID uint32) *ProxyControlMessage {
+	return &ProxyControlMessage{
+		Action: ProxyActionClose,
+		Name:   name,
+		ConnID: connID,
+	}
 }

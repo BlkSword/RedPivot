@@ -40,9 +40,10 @@ type ServerSection struct {
 
 // ClientSection contains client connection configuration
 type ClientSection struct {
-	Server    string        `yaml:"server"`
-	Token     string        `yaml:"token"`
-	Reconnect ReconnectConfig `yaml:"reconnect"`
+	Server             string          `yaml:"server"`
+	Token              string          `yaml:"token"`
+	InsecureSkipVerify bool            `yaml:"insecure_skip_verify"`
+	Reconnect          ReconnectConfig `yaml:"reconnect"`
 }
 
 // ReconnectConfig controls reconnection behavior

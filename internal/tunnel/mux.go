@@ -111,7 +111,7 @@ func (m *Mux) readLoop() {
 			if err == io.EOF {
 				return
 			}
-			// Log error and continue or return
+			// Non-EOF error, close the mux
 			return
 		}
 
@@ -148,6 +148,8 @@ func (m *Mux) handleFrame(frame *protocol.Frame) {
 			stream := val.(*Stream)
 			stream.addData(frame.Payload)
 		}
+		// Note: if stream not found, data is silently dropped
+		// This could happen if the stream was closed before data arrived
 
 	case protocol.FrameCloseStream:
 		if val, ok := m.streams.Load(frame.StreamID); ok {

@@ -55,6 +55,20 @@ func DefaultWSConfig(url string) *WSConfig {
 
 // NewWebSocketClient creates a WebSocket client transport
 func NewWebSocketClient(config *WSConfig) (*WebSocketTransport, error) {
+	// Apply defaults for zero values
+	if config.PingInterval == 0 {
+		config.PingInterval = 30 * time.Second
+	}
+	if config.PongWait == 0 {
+		config.PongWait = 60 * time.Second
+	}
+	if config.WriteBufferSize == 0 {
+		config.WriteBufferSize = 4096
+	}
+	if config.ReadBufferSize == 0 {
+		config.ReadBufferSize = 4096
+	}
+
 	dialer := websocket.Dialer{
 		HandshakeTimeout: 10 * time.Second,
 		ReadBufferSize:   config.ReadBufferSize,
@@ -185,9 +199,12 @@ func (t *WebSocketTransport) Close() error {
 
 	t.closed = true
 
-	// Send close message
+	// Send close message with write lock to avoid concurrent write
+	t.writeMu.Lock()
 	err := t.conn.WriteMessage(websocket.CloseMessage,
 		websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+	t.writeMu.Unlock()
+
 	if err != nil {
 		// Log but continue closing
 	}
