@@ -21,18 +21,60 @@ import (
 )
 
 var (
-	configPath = flag.String("config", "configs/redd.yaml", "Path to configuration file")
-	version    = "dev"
+	configPath  = flag.String("config", "configs/redd.yaml", "Path to configuration file")
+	showVersion = flag.Bool("version", false, "Show version information")
+	showHelp    = flag.Bool("help", false, "Show help information")
+	verify      = flag.Bool("verify", false, "Verify configuration file")
+	version     = "dev"
 )
+
+const helpText = `redd - RedPivot Server
+
+Usage:
+  redd [options]
+
+Options:
+  -config <path>   Path to configuration file (default: configs/redd.yaml)
+  -version         Show version information
+  -help            Show this help message
+  -verify          Verify configuration file and exit
+
+Examples:
+  redd -config /etc/redd/config.yaml
+  redd -verify -config configs/redd.yaml
+`
 
 func main() {
 	flag.Parse()
+
+	// Handle help flag
+	if *showHelp {
+		fmt.Print(helpText)
+		os.Exit(0)
+	}
+
+	// Handle version flag
+	if *showVersion {
+		fmt.Printf("redd version %s\n", version)
+		os.Exit(0)
+	}
 
 	// Load configuration
 	cfg, err := config.LoadServerConfig(*configPath)
 	if err != nil {
 		fmt.Printf("Failed to load config: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Handle verify flag
+	if *verify {
+		fmt.Printf("Configuration file '%s' is valid\n", *configPath)
+		fmt.Printf("  Server bind: %s\n", cfg.Server.Bind)
+		fmt.Printf("  Domain: %s\n", cfg.Server.Domain)
+		fmt.Printf("  TLS enabled: %v\n", cfg.Transport.TLS.Enabled)
+		fmt.Printf("  Auth method: %s\n", cfg.Auth.Method)
+		fmt.Printf("  Obfuscation enabled: %v\n", cfg.Obfuscation.Enabled)
+		os.Exit(0)
 	}
 
 	// Initialize logger

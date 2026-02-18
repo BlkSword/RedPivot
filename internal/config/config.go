@@ -2,7 +2,13 @@
 package config
 
 import (
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -109,6 +115,8 @@ type ProxyConfig struct {
 	RemotePort int    `yaml:"remote_port"`
 	Subdomain  string `yaml:"subdomain"`
 	SecretKey  string `yaml:"secret_key"` // For STCP
+	CertFile   string `yaml:"cert_file"`  // For HTTPS
+	KeyFile    string `yaml:"key_file"`   // For HTTPS
 }
 
 // DefaultServerConfig returns default server configuration
@@ -220,4 +228,161 @@ func SaveClientConfig(config *ClientConfig, path string) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0644)
+}
+
+// LoadClientConfigFromEnv loads client configuration from environment variables
+func LoadClientConfigFromEnv() (*ClientConfig, error) {
+	cfg := DefaultClientConfig()
+
+	// Server URL
+	if server := os.Getenv("REDPIVOT_SERVER"); server != "" {
+		cfg.Client.Server = server
+	} else {
+		return nil, fmt.Errorf("REDPIVOT_SERVER environment variable is required")
+	}
+
+	// Token
+	if token := os.Getenv("REDPIVOT_TOKEN"); token != "" {
+		cfg.Client.Token = token
+	} else {
+		return nil, fmt.Errorf("REDPIVOT_TOKEN environment variable is required")
+	}
+
+	// Parse proxy configs from environment
+	// Format: REDPIVOT_PROXY_1="tcp:127.0.0.1:22:6022"
+	// Format: REDPIVOT_PROXY_2="http:127.0.0.1:8080:subdomain"
+	// Format: REDPIVOT_PROXY_3="stcp:127.0.0.1:9000:secret_key"
+	for i := 1; ; i++ {
+		proxyEnv := os.Getenv(fmt.Sprintf("REDPIVOT_PROXY_%d", i))
+		if proxyEnv == "" {
+			break
+		}
+
+		proxyCfg, err := parseProxyEnv(proxyEnv)
+		if err != nil {
+			return nil, fmt.Errorf("invalid REDPIVOT_PROXY_%d: %w", i, err)
+		}
+		cfg.Proxies = append(cfg.Proxies, proxyCfg)
+	}
+
+	return cfg, nil
+}
+
+// parseProxyEnv parses a proxy definition from environment variable
+// Format: type:local_addr:remote_port_or_subdomain[:secret_key]
+func parseProxyEnv(s string) (ProxyConfig, error) {
+	parts := strings.Split(s, ":")
+	if len(parts) < 3 {
+		return ProxyConfig{}, fmt.Errorf("invalid format, expected type:local:port_or_subdomain")
+	}
+
+	proxyCfg := ProxyConfig{
+		Type:  parts[0],
+		Local: parts[1],
+	}
+
+	switch parts[0] {
+	case "tcp", "udp", "stcp":
+		if len(parts) < 3 {
+			return ProxyConfig{}, fmt.Errorf("missing remote port for %s proxy", parts[0])
+		}
+		port, err := strconv.Atoi(parts[2])
+		if err != nil {
+			return ProxyConfig{}, fmt.Errorf("invalid remote port: %s", parts[2])
+		}
+		proxyCfg.RemotePort = port
+		proxyCfg.Name = fmt.Sprintf("%s-%d", parts[0], port)
+
+		if parts[0] == "stcp" && len(parts) > 3 {
+			proxyCfg.SecretKey = parts[3]
+		}
+
+	case "http", "https":
+		proxyCfg.Subdomain = parts[2]
+		proxyCfg.Name = fmt.Sprintf("%s-%s", parts[0], parts[2])
+
+	default:
+		return ProxyConfig{}, fmt.Errorf("unknown proxy type: %s", parts[0])
+	}
+
+	return proxyCfg, nil
+}
+
+// LoadClientConfigFromStdin reads base64 encoded JSON/YAML configuration from stdin
+func LoadClientConfigFromStdin() (*ClientConfig, error) {
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read stdin: %w", err)
+	}
+
+	// Trim whitespace
+	input := strings.TrimSpace(string(data))
+	if input == "" {
+		return nil, fmt.Errorf("stdin is empty")
+	}
+
+	// Try base64 decode first
+	decoded, err := base64.StdEncoding.DecodeString(input)
+	if err != nil {
+		// Not base64, try raw JSON/YAML
+		decoded = []byte(input)
+	}
+
+	cfg := DefaultClientConfig()
+
+	// Try JSON first
+	if err := json.Unmarshal(decoded, cfg); err == nil {
+		return cfg, nil
+	}
+
+	// Try YAML
+	if err := yaml.Unmarshal(decoded, cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse config as JSON or YAML: %w", err)
+	}
+
+	return cfg, nil
+}
+
+// Validate validates the proxy configuration
+func (p *ProxyConfig) Validate() error {
+	if p.Name == "" {
+		return fmt.Errorf("proxy name is required")
+	}
+	if p.Type == "" {
+		return fmt.Errorf("proxy type is required")
+	}
+
+	switch p.Type {
+	case "tcp", "udp", "stcp":
+		if p.Local == "" {
+			return fmt.Errorf("local address is required for %s proxy", p.Type)
+		}
+		if p.RemotePort <= 0 || p.RemotePort > 65535 {
+			return fmt.Errorf("invalid remote port: %d", p.RemotePort)
+		}
+		if p.Type == "stcp" && p.SecretKey == "" {
+			return fmt.Errorf("secret_key is required for stcp proxy")
+		}
+
+	case "http":
+		if p.Local == "" {
+			return fmt.Errorf("local address is required for http proxy")
+		}
+
+	case "https":
+		if p.Local == "" {
+			return fmt.Errorf("local address is required for https proxy")
+		}
+		if p.CertFile == "" {
+			return fmt.Errorf("cert_file is required for https proxy")
+		}
+		if p.KeyFile == "" {
+			return fmt.Errorf("key_file is required for https proxy")
+		}
+
+	default:
+		return fmt.Errorf("unknown proxy type: %s", p.Type)
+	}
+
+	return nil
 }

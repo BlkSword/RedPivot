@@ -56,6 +56,14 @@ proxies:
   #   local: "127.0.0.1:9000"
   #   secret_key: "shared-secret-key"
 
+  # HTTPS Proxy - TLS termination with custom certificate
+  # - name: "secure-web"
+  #   type: "https"
+  #   local: "127.0.0.1:8443"
+  #   subdomain: "secure"
+  #   cert_file: "/etc/redctl/cert.pem"
+  #   key_file: "/etc/redctl/key.pem"
+
 # Logging configuration
 logging:
   level: "info"

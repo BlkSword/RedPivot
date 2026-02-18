@@ -49,7 +49,7 @@ redpivot/
 │   │   └── websocket.go   # WebSocket 传输
 │   ├── countermeasure/    # 反制措施
 │   │   └── obfuscator.go  # 流量混淆
-│   ├── opsec/             # 安全运营 ⭐ NEW
+│   ├── opsec/             # 安全运营
 │   │   ├── memory.go      # 内存安全
 │   │   ├── anti_debug.go  # 反调试/反沙箱
 │   │   ├── diskless.go    # 无盘模式

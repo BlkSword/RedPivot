@@ -22,18 +22,88 @@ import (
 )
 
 var (
-	configPath = flag.String("config", "configs/redctl.yaml", "Path to configuration file")
-	version    = "dev"
+	configPath  = flag.String("config", "configs/redctl.yaml", "Path to configuration file")
+	showVersion = flag.Bool("version", false, "Show version information")
+	showHelp    = flag.Bool("help", false, "Show help information")
+	verify      = flag.Bool("verify", false, "Verify configuration file")
+	diskless    = flag.Bool("diskless", false, "Run in diskless mode (no config file)")
+	envConfig   = flag.Bool("env", false, "Read configuration from environment variables")
+	stdinConfig = flag.Bool("stdin", false, "Read configuration from stdin (base64 JSON)")
+	version     = "dev"
 )
+
+const helpText = `redctl - RedPivot Client
+
+Usage:
+  redctl [options]
+
+Options:
+  -config <path>   Path to configuration file (default: configs/redctl.yaml)
+  -version         Show version information
+  -help            Show this help message
+  -verify          Verify configuration file and exit
+  -diskless        Run in diskless mode (no config file on disk)
+  -env             Read configuration from environment variables (use with -diskless)
+  -stdin           Read configuration from stdin as base64 JSON (use with -diskless)
+
+Diskless Mode Environment Variables:
+  REDPIVOT_SERVER  Server URL (e.g., wss://server:443/ws)
+  REDPIVOT_TOKEN   Authentication token
+  REDPIVOT_PROXY_1 Proxy definition (e.g., tcp:127.0.0.1:22:6022)
+
+Examples:
+  redctl -config configs/redctl.yaml
+  redctl -verify -config configs/redctl.yaml
+  redctl -diskless -env
+  echo "base64-config" | redctl -diskless -stdin
+`
 
 func main() {
 	flag.Parse()
 
-	// Load configuration
-	cfg, err := config.LoadClientConfig(*configPath)
+	// Handle help flag
+	if *showHelp {
+		fmt.Print(helpText)
+		os.Exit(0)
+	}
+
+	// Handle version flag
+	if *showVersion {
+		fmt.Printf("redctl version %s\n", version)
+		os.Exit(0)
+	}
+
+	// Load configuration based on mode
+	var cfg *config.ClientConfig
+	var err error
+
+	if *diskless {
+		if *stdinConfig {
+			cfg, err = config.LoadClientConfigFromStdin()
+		} else if *envConfig {
+			cfg, err = config.LoadClientConfigFromEnv()
+		} else {
+			fmt.Println("Diskless mode requires -env or -stdin flag")
+			os.Exit(1)
+		}
+	} else {
+		cfg, err = config.LoadClientConfig(*configPath)
+	}
+
 	if err != nil {
 		fmt.Printf("Failed to load config: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Handle verify flag
+	if *verify {
+		fmt.Printf("Configuration is valid\n")
+		fmt.Printf("  Server: %s\n", cfg.Client.Server)
+		fmt.Printf("  Proxies: %d\n", len(cfg.Proxies))
+		for _, p := range cfg.Proxies {
+			fmt.Printf("    - %s (%s): %s\n", p.Name, p.Type, p.Local)
+		}
+		os.Exit(0)
 	}
 
 	// Initialize logger
@@ -260,6 +330,16 @@ func (c *Client) startProxies() error {
 				"", // Domain from server
 			)
 
+		case "https":
+			p = proxy.NewHTTPSProxy(
+				proxyCfg.Name,
+				proxyCfg.Subdomain,
+				proxyCfg.Local,
+				proxyCfg.CertFile,
+				proxyCfg.KeyFile,
+			)
+			p.(*proxy.HTTPSProxy).SetStreamPool(muxAdapter)
+
 		case "stcp":
 			p = proxy.NewTCPProxy(
 				proxyCfg.Name,
@@ -267,6 +347,10 @@ func (c *Client) startProxies() error {
 				uint16(proxyCfg.RemotePort),
 			)
 			p.(*proxy.TCPProxy).SetStreamPool(muxAdapter)
+			c.logger.Info("STCP proxy configured",
+				utils.String("name", proxyCfg.Name),
+				utils.Any("has_secret", proxyCfg.SecretKey != ""),
+			)
 
 		default:
 			c.logger.Warn("Unknown proxy type",
