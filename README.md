@@ -2,6 +2,14 @@
 
 高级内网穿透反向代理工具，专为安全研究和红队测试设计，具备四层安全架构。
 
+## 特性
+
+- **四层安全架构** - 传输加密、流量混淆、反调试、内存安全
+- **多种代理类型** - TCP、UDP、HTTP、HTTPS、STCP (密钥保护)
+- **无盘模式** - 配置仅存内存，支持环境变量配置
+- **交互式配置向导** - 快速生成配置文件
+- **自动重连** - 指数退避重连机制
+
 ## 架构设计
 
 | 层级 | 名称 | 功能 |
@@ -21,6 +29,16 @@ powershell scripts/build.ps1
 
 # Linux/macOS
 bash scripts/build.sh
+```
+
+### 交互式配置生成
+
+```bash
+# 服务端配置向导
+./bin/redd config init
+
+# 客户端配置向导
+./bin/redctl config init
 ```
 
 ### 运行
@@ -49,6 +67,7 @@ export REDPIVOT_PROXY_1="tcp:127.0.0.1:22:6022"
 | `-version` | 显示版本信息 |
 | `-help` | 显示帮助信息 |
 | `-verify` | 验证配置文件并退出 |
+| `config init` | 交互式生成配置文件 |
 
 ### 客户端 (redctl)
 
@@ -61,6 +80,7 @@ export REDPIVOT_PROXY_1="tcp:127.0.0.1:22:6022"
 | `-diskless` | 无盘模式运行 |
 | `-env` | 从环境变量读取配置 |
 | `-stdin` | 从 stdin 读取配置 (Base64 JSON) |
+| `config init` | 交互式生成配置文件 |
 
 ---
 
@@ -186,6 +206,7 @@ logging:
 |------|------|------|
 | `server` | string | 服务端地址 (如: wss://server:443/ws) |
 | `token` | string | 认证 Token |
+| `insecure_skip_verify` | bool | 跳过 TLS 证书验证 (默认: false) |
 
 #### client.reconnect - 重连配置
 
@@ -285,6 +306,7 @@ logging:
 client:
   server: "wss://pivot.example.com:443/ws"
   token: "your-secret-token-here"
+  insecure_skip_verify: false
   reconnect:
     enabled: true
     max_attempts: 10
@@ -341,13 +363,18 @@ logging:
 
 ---
 
-## 无盘模式环境变量
+## 无盘模式
+
+无盘模式下配置仅存于内存，不会在磁盘留下痕迹。
+
+### 环境变量
 
 | 变量名 | 说明 | 示例 |
 |--------|------|------|
 | `REDPIVOT_SERVER` | 服务端地址 | `wss://server:443/ws` |
 | `REDPIVOT_TOKEN` | 认证 Token | `your-secret-token` |
 | `REDPIVOT_PROXY_N` | 代理定义 | `tcp:127.0.0.1:22:6022` |
+| `REDPIVOT_INSECURE` | 跳过 TLS 验证 (任意值) | `1` |
 
 ### 代理定义格式
 
@@ -361,14 +388,52 @@ logging:
 
 示例:
 ```bash
+export REDPIVOT_SERVER="wss://pivot.example.com:443/ws"
+export REDPIVOT_TOKEN="your-secret-token"
 export REDPIVOT_PROXY_1="tcp:127.0.0.1:22:6022"
 export REDPIVOT_PROXY_2="http:127.0.0.1:8080:myapp"
 export REDPIVOT_PROXY_3="stcp:127.0.0.1:9000:6900:secret123"
+
+./bin/redctl -diskless -env
+```
+
+### Stdin 模式
+
+支持通过 stdin 传入 Base64 编码的 JSON/YAML 配置：
+
+```bash
+echo "eyJjbGllbnQiOnsic2VydmVyIjoid3NzOi8vLi4uIn19" | ./bin/redctl -diskless -stdin
 ```
 
 ---
 
+## 项目结构
+
+```
+RedPivot/
+├── cmd/
+│   ├── redd/          # 服务端入口
+│   └── redctl/        # 客户端入口
+├── internal/
+│   ├── auth/          # Token 认证 + 速率限制
+│   ├── client/        # 客户端代理处理器
+│   ├── config/        # 配置加载
+│   │   └── wizard/    # 交互式配置向导
+│   ├── countermeasure/# 流量混淆
+│   ├── opsec/         # 安全运营 (反调试、无盘模式)
+│   ├── proxy/         # 代理实现 (TCP/UDP/HTTP/HTTPS)
+│   ├── server/        # 服务端代理管理器
+│   ├── transport/     # 传输层 (WebSocket)
+│   └── tunnel/        # 隧道核心 (加密、多路复用)
+├── pkg/
+│   ├── protocol/      # 协议帧定义
+│   └── utils/         # 工具函数
+├── configs/           # 配置文件示例
+└── scripts/           # 构建脚本
+```
+
+---
 
 ## License
 
-MIT License 
+MIT License
