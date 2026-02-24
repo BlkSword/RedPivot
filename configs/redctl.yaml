@@ -15,6 +15,21 @@ client:
     initial_delay: 1s
     max_delay: 60s
 
+  # HTTP Appearance - Traffic camouflage to mimic browser traffic
+  http_appearance:
+    enabled: true
+    # Browser type for random UA: chrome, firefox, safari, edge, any
+    browser: "chrome"
+    # Or use custom User-Agent (overrides browser selection)
+    # user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    # Custom HTTP headers to add
+    extra_headers:
+      "Accept": "*/*"
+      "Accept-Language": "en-US,en;q=0.9"
+      "Cache-Control": "no-cache"
+    # URI template for WebSocket path (optional)
+    # uri_template: "/api/v1/stream"
+
 # Proxy definitions
 # Each proxy exposes a local service through the tunnel
 

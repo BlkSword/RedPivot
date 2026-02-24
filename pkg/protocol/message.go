@@ -102,11 +102,13 @@ func DecodeAuth(data []byte) (*AuthMessage, error) {
 type ProxyType byte
 
 const (
-	ProxyTypeTCP   ProxyType = 0x01
-	ProxyTypeUDP   ProxyType = 0x02
-	ProxyTypeHTTP  ProxyType = 0x03
-	ProxyTypeHTTPS ProxyType = 0x04
-	ProxyTypeSTCP  ProxyType = 0x05 // Secret TCP (requires visitor)
+	ProxyTypeTCP     ProxyType = 0x01
+	ProxyTypeUDP     ProxyType = 0x02
+	ProxyTypeHTTP    ProxyType = 0x03
+	ProxyTypeHTTPS   ProxyType = 0x04
+	ProxyTypeSTCP    ProxyType = 0x05 // Secret TCP (requires visitor)
+	ProxyTypeSOCKS5  ProxyType = 0x06 // SOCKS5 forward proxy
+	ProxyTypeRSOCKS5 ProxyType = 0x07 // SOCKS5 reverse proxy
 )
 
 // ProxyMessage represents proxy registration
@@ -237,11 +239,13 @@ const (
 type ProxyMessageType string
 
 const (
-	ProxyMessageTypeTCP   ProxyMessageType = "tcp"
-	ProxyMessageTypeUDP   ProxyMessageType = "udp"
-	ProxyMessageTypeHTTP  ProxyMessageType = "http"
-	ProxyMessageTypeHTTPS ProxyMessageType = "https"
-	ProxyMessageTypeSTCP  ProxyMessageType = "stcp"
+	ProxyMessageTypeTCP    ProxyMessageType = "tcp"
+	ProxyMessageTypeUDP    ProxyMessageType = "udp"
+	ProxyMessageTypeHTTP   ProxyMessageType = "http"
+	ProxyMessageTypeHTTPS  ProxyMessageType = "https"
+	ProxyMessageTypeSTCP   ProxyMessageType = "stcp"
+	ProxyMessageTypeSOCKS5 ProxyMessageType = "socks5"
+	ProxyMessageTypeRSOCKS ProxyMessageType = "rsocks5"
 )
 
 // ProxyControlMessage represents a proxy control message (JSON encoded)

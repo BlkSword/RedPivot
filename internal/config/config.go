@@ -16,11 +16,12 @@ import (
 
 // ServerConfig represents server-side configuration
 type ServerConfig struct {
-	Server   ServerSection   `yaml:"server"`
-	Auth     AuthSection     `yaml:"auth"`
-	Transport TransportSection `yaml:"transport"`
-	Obfuscation ObfuscationSection `yaml:"obfuscation"`
-	Logging  LoggingSection  `yaml:"logging"`
+	Server        ServerSection        `yaml:"server"`
+	Auth          AuthSection          `yaml:"auth"`
+	Transport     TransportSection     `yaml:"transport"`
+	Obfuscation   ObfuscationSection   `yaml:"obfuscation"`
+	ActiveDefense ActiveDefenseSection `yaml:"active_defense"`
+	Logging       LoggingSection       `yaml:"logging"`
 }
 
 // ClientConfig represents client-side configuration
@@ -40,10 +41,11 @@ type ServerSection struct {
 
 // ClientSection contains client connection configuration
 type ClientSection struct {
-	Server             string          `yaml:"server"`
-	Token              string          `yaml:"token"`
-	InsecureSkipVerify bool            `yaml:"insecure_skip_verify"`
-	Reconnect          ReconnectConfig `yaml:"reconnect"`
+	Server             string             `yaml:"server"`
+	Token              string             `yaml:"token"`
+	InsecureSkipVerify bool               `yaml:"insecure_skip_verify"`
+	Reconnect          ReconnectConfig    `yaml:"reconnect"`
+	HttpAppearance     HttpAppearanceConf `yaml:"http_appearance"`
 }
 
 // ReconnectConfig controls reconnection behavior
@@ -52,6 +54,15 @@ type ReconnectConfig struct {
 	MaxAttempts  int           `yaml:"max_attempts"`
 	InitialDelay time.Duration `yaml:"initial_delay"`
 	MaxDelay     time.Duration `yaml:"max_delay"`
+}
+
+// HttpAppearanceConf contains HTTP traffic appearance configuration
+type HttpAppearanceConf struct {
+	Enabled      bool              `yaml:"enabled"`
+	UserAgent    string            `yaml:"user_agent"`
+	Browser      string            `yaml:"browser"` // chrome, firefox, safari, edge, any
+	ExtraHeaders map[string]string `yaml:"extra_headers"`
+	UriTemplate  string            `yaml:"uri_template"`
 }
 
 // AuthSection contains authentication settings
@@ -94,11 +105,65 @@ type QUICConfig struct {
 
 // ObfuscationSection contains anti-traffic-analysis settings
 type ObfuscationSection struct {
-	Enabled           bool    `yaml:"enabled"`
-	PaddingProbability float64 `yaml:"padding_probability"`
-	TimingJitterMs    int     `yaml:"timing_jitter_ms"`
-	ChunkMinSize      int     `yaml:"chunk_min_size"`
-	ChunkMaxSize      int     `yaml:"chunk_max_size"`
+	Enabled              bool                    `yaml:"enabled"`
+	PaddingProbability   float64                 `yaml:"padding_probability"`
+	TimingJitterMs       int                     `yaml:"timing_jitter_ms"`
+	ChunkMinSize         int                     `yaml:"chunk_min_size"`
+	ChunkMaxSize         int                     `yaml:"chunk_max_size"`
+	KeyRotation          KeyRotationConfig       `yaml:"key_rotation"`
+	DGAHeartbeat         DGAHeartbeatConfig      `yaml:"dga_heartbeat"`
+	FrameRandomization   FrameRandomizerConfig   `yaml:"frame_randomization"`
+}
+
+// KeyRotationConfig holds key rotation configuration
+type KeyRotationConfig struct {
+	Enabled        bool          `yaml:"enabled"`
+	Interval       time.Duration `yaml:"interval"`
+	GracePeriod    time.Duration `yaml:"grace_period"`
+	KeyHistorySize int           `yaml:"key_history_size"`
+	RotationNotify bool          `yaml:"rotation_notify"`
+}
+
+// DGAHeartbeatConfig holds DGA heartbeat configuration
+type DGAHeartbeatConfig struct {
+	Enabled      bool          `yaml:"enabled"`
+	Seed         string        `yaml:"seed"`       // base64 encoded seed
+	Interval     time.Duration `yaml:"interval"`
+	JitterMax    time.Duration `yaml:"jitter_max"`
+	Adaptive     bool          `yaml:"adaptive"`
+	MinInterval  time.Duration `yaml:"min_interval"`
+	MaxInterval  time.Duration `yaml:"max_interval"`
+}
+
+// FrameRandomizerConfig holds frame randomization configuration
+type FrameRandomizerConfig struct {
+	Enabled           bool `yaml:"enabled"`
+	MinPadding        int  `yaml:"min_padding"`
+	MaxPadding        int  `yaml:"max_padding"`
+	TimingJitterMinMs int  `yaml:"timing_jitter_min_ms"`
+	TimingJitterMaxMs int  `yaml:"timing_jitter_max_ms"`
+	SizeRandomization bool `yaml:"size_randomization"`
+}
+
+// ActiveDefenseSection contains active defense mechanisms settings
+type ActiveDefenseSection struct {
+	Fallback   FallbackConfig   `yaml:"fallback"`
+	PortKnock  PortKnockConfig  `yaml:"port_knock"`
+}
+
+// FallbackConfig contains fallback URL redirect settings
+type FallbackConfig struct {
+	Enabled   bool   `yaml:"enabled"`
+	TargetURL string `yaml:"target_url"`
+	LogOnly   bool   `yaml:"log_only"` // If true, only log without redirecting
+}
+
+// PortKnockConfig contains port knocking/SPA settings
+type PortKnockConfig struct {
+	Enabled   bool          `yaml:"enabled"`
+	Secret    string        `yaml:"secret"`     // HMAC secret key (base64 encoded)
+	TTL       time.Duration `yaml:"ttl"`        // How long a knock is valid (default: 5m)
+	ReplayTTL time.Duration `yaml:"replay_ttl"` // How long to track used knocks (default: 10m)
 }
 
 // LoggingSection contains logging configuration
@@ -150,11 +215,48 @@ func DefaultServerConfig() *ServerConfig {
 			},
 		},
 		Obfuscation: ObfuscationSection{
-			Enabled:           true,
-			PaddingProbability: 0.3,
-			TimingJitterMs:    50,
-			ChunkMinSize:      64,
-			ChunkMaxSize:      1500,
+			Enabled:              true,
+			PaddingProbability:   0.3,
+			TimingJitterMs:       50,
+			ChunkMinSize:         64,
+			ChunkMaxSize:         1500,
+			KeyRotation: KeyRotationConfig{
+				Enabled:        false,
+				Interval:       30 * time.Minute,
+				GracePeriod:    5 * time.Minute,
+				KeyHistorySize: 3,
+				RotationNotify: true,
+			},
+			DGAHeartbeat: DGAHeartbeatConfig{
+				Enabled:     false,
+				Seed:        "",
+				Interval:    30 * time.Second,
+				JitterMax:   10 * time.Second,
+				Adaptive:    false,
+				MinInterval: 15 * time.Second,
+				MaxInterval: 60 * time.Second,
+			},
+			FrameRandomization: FrameRandomizerConfig{
+				Enabled:           true,
+				MinPadding:        4,
+				MaxPadding:        128,
+				TimingJitterMinMs: 0,
+				TimingJitterMaxMs: 50,
+				SizeRandomization: true,
+			},
+		},
+		ActiveDefense: ActiveDefenseSection{
+			Fallback: FallbackConfig{
+				Enabled:   false,
+				TargetURL: "",
+				LogOnly:   false,
+			},
+			PortKnock: PortKnockConfig{
+				Enabled:   false,
+				Secret:    "",
+				TTL:       5 * time.Minute,
+				ReplayTTL: 10 * time.Minute,
+			},
 		},
 		Logging: LoggingSection{
 			Level:  "info",
@@ -173,6 +275,14 @@ func DefaultClientConfig() *ClientConfig {
 				MaxAttempts:  10,
 				InitialDelay: 1 * time.Second,
 				MaxDelay:     60 * time.Second,
+			},
+			HttpAppearance: HttpAppearanceConf{
+				Enabled:   false,
+				Browser:   "chrome",
+				ExtraHeaders: map[string]string{
+					"Accept":          "*/*",
+					"Accept-Language": "en-US,en;q=0.9",
+				},
 			},
 		},
 		Logging: LoggingSection{
@@ -253,6 +363,8 @@ func LoadClientConfigFromEnv() (*ClientConfig, error) {
 	// Format: REDPIVOT_PROXY_1="tcp:127.0.0.1:22:6022"
 	// Format: REDPIVOT_PROXY_2="http:127.0.0.1:8080:subdomain"
 	// Format: REDPIVOT_PROXY_3="stcp:127.0.0.1:9000:secret_key"
+	// Format: REDPIVOT_PROXY_4="socks5:127.0.0.1:1080[:port]"
+	// Format: REDPIVOT_PROXY_5="rsocks5:127.0.0.1:1080:port"
 	for i := 1; ; i++ {
 		proxyEnv := os.Getenv(fmt.Sprintf("REDPIVOT_PROXY_%d", i))
 		if proxyEnv == "" {
@@ -301,6 +413,29 @@ func parseProxyEnv(s string) (ProxyConfig, error) {
 	case "http", "https":
 		proxyCfg.Subdomain = parts[2]
 		proxyCfg.Name = fmt.Sprintf("%s-%s", parts[0], parts[2])
+
+	case "socks5":
+		// Format: socks5:local[:remote_port]
+		proxyCfg.Name = "socks5-proxy"
+		if len(parts) >= 3 && parts[2] != "" {
+			port, err := strconv.Atoi(parts[2])
+			if err != nil {
+				return ProxyConfig{}, fmt.Errorf("invalid remote port: %s", parts[2])
+			}
+			proxyCfg.RemotePort = port
+		}
+
+	case "rsocks5":
+		// Format: rsocks5:local:remote_port
+		if len(parts) < 3 {
+			return ProxyConfig{}, fmt.Errorf("rsocks5 requires remote port")
+		}
+		port, err := strconv.Atoi(parts[2])
+		if err != nil {
+			return ProxyConfig{}, fmt.Errorf("invalid remote port: %s", parts[2])
+		}
+		proxyCfg.RemotePort = port
+		proxyCfg.Name = fmt.Sprintf("rsocks5-%d", port)
 
 	default:
 		return ProxyConfig{}, fmt.Errorf("unknown proxy type: %s", parts[0])
@@ -379,6 +514,23 @@ func (p *ProxyConfig) Validate() error {
 		}
 		if p.KeyFile == "" {
 			return fmt.Errorf("key_file is required for https proxy")
+		}
+
+	case "socks5":
+		if p.Local == "" {
+			return fmt.Errorf("local address is required for socks5 proxy")
+		}
+		// Remote port is optional for socks5 (server can auto-assign)
+		if p.RemotePort < 0 || p.RemotePort > 65535 {
+			return fmt.Errorf("invalid remote port: %d", p.RemotePort)
+		}
+
+	case "rsocks5":
+		if p.Local == "" {
+			return fmt.Errorf("local address is required for rsocks5 proxy")
+		}
+		if p.RemotePort <= 0 || p.RemotePort > 65535 {
+			return fmt.Errorf("remote port is required for rsocks5 proxy")
 		}
 
 	default:

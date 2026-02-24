@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"sync"
@@ -232,9 +233,38 @@ func (c *Client) connect() error {
 		tlsConfig.InsecureSkipVerify = true
 	}
 
+	// Build headers with HTTP appearance if enabled
+	var headers http.Header
+	if c.cfg.Client.HttpAppearance.Enabled {
+		appearance := transport.NewHttpAppearance(c.logger)
+		appearance.Enabled = c.cfg.Client.HttpAppearance.Enabled
+
+		// Set User-Agent based on browser type or custom UA
+		if c.cfg.Client.HttpAppearance.UserAgent != "" {
+			appearance.UserAgent = c.cfg.Client.HttpAppearance.UserAgent
+		} else if c.cfg.Client.HttpAppearance.Browser != "" {
+			appearance.UserAgent = transport.GetUAByBrowser(c.cfg.Client.HttpAppearance.Browser)
+		}
+
+		// Set extra headers
+		if len(c.cfg.Client.HttpAppearance.ExtraHeaders) > 0 {
+			appearance.ExtraHeaders = c.cfg.Client.HttpAppearance.ExtraHeaders
+		}
+
+		// Set URI template (stored for future use)
+		if c.cfg.Client.HttpAppearance.UriTemplate != "" {
+			appearance.UriTemplate = c.cfg.Client.HttpAppearance.UriTemplate
+		}
+
+		headers = appearance.BuildHeaders(c.cfg.Client.Server)
+		c.logger.Info("HTTP appearance enabled",
+			utils.String("browser", c.cfg.Client.HttpAppearance.Browser))
+	}
+
 	wsConfig := &transport.WSConfig{
 		URL:       c.cfg.Client.Server,
 		TLSConfig: tlsConfig,
+		Header:    headers,
 	}
 
 	// Connect

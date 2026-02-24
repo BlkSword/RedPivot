@@ -25,13 +25,15 @@ func RunProxyWizardWithDefaults(w *Wizard, defaultNameFunc func(int) string) (*c
 	proxy.Name = name
 
 	// Proxy type
-	proxyTypes := []string{"tcp", "udp", "http", "https", "stcp"}
+	proxyTypes := []string{"tcp", "udp", "http", "https", "stcp", "socks5", "rsocks5"}
 	typeDescriptions := []string{
 		"TCP 端口转发",
 		"UDP 端口转发",
 		"HTTP 子域名代理",
 		"HTTPS 子域名代理",
 		"密钥保护的 TCP",
+		"SOCKS5 正向代理",
+		"SOCKS5 反向代理",
 	}
 
 	w.Println("  代理类型:")
@@ -119,6 +121,29 @@ func RunProxyWizardWithDefaults(w *Wizard, defaultNameFunc func(int) string) (*c
 			return nil, err
 		}
 		proxy.KeyFile = keyFile
+
+	case "socks5":
+		// SOCKS5 正向代理 - 远程端口可选（服务端自动分配）
+		w.Println("  远程端口 (留空则由服务端自动分配)")
+		remotePortStr, err := w.ReadLine("远程端口", "")
+		if err != nil {
+			return nil, err
+		}
+		if remotePortStr != "" {
+			port, err := strconv.Atoi(remotePortStr)
+			if err != nil {
+				return nil, fmt.Errorf("无效端口: %s", remotePortStr)
+			}
+			proxy.RemotePort = port
+		}
+
+	case "rsocks5":
+		// SOCKS5 反向代理 - 需要指定远程端口
+		remotePort, err := w.ReadInt("远程端口", 1080)
+		if err != nil {
+			return nil, err
+		}
+		proxy.RemotePort = remotePort
 	}
 
 	return proxy, nil
@@ -162,6 +187,12 @@ func ValidateProxyConfig(proxy *config.ProxyConfig) error {
 		}
 		if proxy.KeyFile == "" {
 			return fmt.Errorf("HTTPS 代理需要私钥文件")
+		}
+	case "socks5":
+		// Remote port is optional for socks5
+	case "rsocks5":
+		if proxy.RemotePort <= 0 || proxy.RemotePort > 65535 {
+			return fmt.Errorf("远程端口无效: %d", proxy.RemotePort)
 		}
 	default:
 		return fmt.Errorf("未知代理类型: %s", proxy.Type)
@@ -213,6 +244,29 @@ func ParseProxyConfig(s string) (*config.ProxyConfig, error) {
 				proxy.KeyFile = parts[4]
 			}
 		}
+
+	case "socks5":
+		// Format: socks5:local[:remote_port]
+		proxy.Name = "socks5-proxy"
+		if len(parts) >= 3 && parts[2] != "" {
+			port, err := strconv.Atoi(parts[2])
+			if err != nil {
+				return nil, fmt.Errorf("无效端口: %s", parts[2])
+			}
+			proxy.RemotePort = port
+		}
+
+	case "rsocks5":
+		// Format: rsocks5:local:remote_port
+		if len(parts) < 3 {
+			return nil, fmt.Errorf("rsocks5 需要指定远程端口")
+		}
+		port, err := strconv.Atoi(parts[2])
+		if err != nil {
+			return nil, fmt.Errorf("无效端口: %s", parts[2])
+		}
+		proxy.RemotePort = port
+		proxy.Name = fmt.Sprintf("rsocks5-%d", port)
 
 	default:
 		return nil, fmt.Errorf("未知代理类型: %s", parts[0])

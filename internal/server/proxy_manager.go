@@ -100,6 +100,15 @@ func (pm *ProxyManager) RegisterProxy(msg *protocol.ProxyControlMessage) error {
 		proxy.listener = listener
 		go pm.acceptLoop(proxy)
 
+	case protocol.ProxyMessageTypeSOCKS5, protocol.ProxyMessageTypeRSOCKS:
+		addr := fmt.Sprintf("0.0.0.0:%d", msg.RemotePort)
+		listener, err := net.Listen("tcp", addr)
+		if err != nil {
+			return fmt.Errorf("failed to listen on %s: %w", addr, err)
+		}
+		proxy.listener = listener
+		go pm.acceptLoop(proxy)
+
 	default:
 		return fmt.Errorf("unsupported proxy type: %s", msg.Type)
 	}

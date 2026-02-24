@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/redpivot/redpivot/internal/config"
+	"github.com/redpivot/redpivot/internal/proxy"
 	"github.com/redpivot/redpivot/pkg/protocol"
 	"github.com/redpivot/redpivot/pkg/utils"
 )
@@ -43,15 +44,27 @@ type ProxyHandler struct {
 	conns        map[uint32]*ClientConn
 	mu           sync.RWMutex
 	logger       *utils.Logger
+
+	// Local proxy listeners (for SOCKS5, etc.)
+	localListeners map[string]localProxy
+	listenersMu    sync.RWMutex
+}
+
+// localProxy represents a locally running proxy
+type localProxy struct {
+	proxy   interface{} // *proxy.SOCKS5Proxy or similar
+	closed  atomic.Bool
+	stopCh  chan struct{}
 }
 
 // NewProxyHandler creates a new proxy handler
 func NewProxyHandler(streamOpener StreamOpener, logger *utils.Logger) *ProxyHandler {
 	return &ProxyHandler{
-		streamOpener: streamOpener,
-		proxies:      make(map[string]*config.ProxyConfig),
-		conns:        make(map[uint32]*ClientConn),
-		logger:       logger,
+		streamOpener:   streamOpener,
+		proxies:        make(map[string]*config.ProxyConfig),
+		conns:          make(map[uint32]*ClientConn),
+		logger:         logger,
+		localListeners: make(map[string]localProxy),
 	}
 }
 
@@ -63,6 +76,18 @@ func (ph *ProxyHandler) RegisterProxies(proxies []config.ProxyConfig) error {
 	for i := range proxies {
 		cfg := &proxies[i]
 		ph.proxies[cfg.Name] = cfg
+
+		// Handle SOCKS5 forward proxy - runs locally
+		if cfg.Type == "socks5" {
+			if err := ph.startLocalSOCKS5(cfg); err != nil {
+				return fmt.Errorf("failed to start SOCKS5 proxy %s: %w", cfg.Name, err)
+			}
+			ph.logger.Info("SOCKS5 proxy started locally",
+				utils.String("name", cfg.Name),
+				utils.String("local", cfg.Local),
+			)
+			continue
+		}
 
 		stream, err := ph.streamOpener.OpenStream()
 		if err != nil {
@@ -103,6 +128,38 @@ func (ph *ProxyHandler) RegisterProxies(proxies []config.ProxyConfig) error {
 			utils.Int("remote_port", cfg.RemotePort),
 		)
 	}
+
+	return nil
+}
+
+// startLocalSOCKS5 starts a local SOCKS5 proxy server
+func (ph *ProxyHandler) startLocalSOCKS5(cfg *config.ProxyConfig) error {
+	socks5Proxy := proxy.NewSOCKS5Proxy(cfg.Name, cfg.Local)
+
+	// Set up callbacks to handle connections through the tunnel
+	socks5Proxy.OnConnect(func(clientConn net.Conn, targetAddr string) {
+		// This callback is called when a new connection arrives
+		// We need to establish a stream through the tunnel to the server
+		// For SOCKS5 forward proxy, we handle this differently
+		ph.logger.Debug("SOCKS5 connection request",
+			utils.String("proxy", cfg.Name),
+			utils.String("target", targetAddr),
+		)
+	})
+
+	if err := socks5Proxy.Start(); err != nil {
+		return err
+	}
+
+	lp := localProxy{
+		proxy:  socks5Proxy,
+		closed: atomic.Bool{},
+		stopCh: make(chan struct{}),
+	}
+
+	ph.listenersMu.Lock()
+	ph.localListeners[cfg.Name] = lp
+	ph.listenersMu.Unlock()
 
 	return nil
 }
@@ -323,6 +380,19 @@ func (ph *ProxyHandler) Close() {
 	ph.mu.Lock()
 	defer ph.mu.Unlock()
 
+	// Close local proxy listeners
+	ph.listenersMu.Lock()
+	for name, lp := range ph.localListeners {
+		if lp.closed.CompareAndSwap(false, true) {
+			close(lp.stopCh)
+			if p, ok := lp.proxy.(*proxy.SOCKS5Proxy); ok {
+				p.Close()
+			}
+		}
+		delete(ph.localListeners, name)
+	}
+	ph.listenersMu.Unlock()
+
 	for _, conn := range ph.conns {
 		conn.Close()
 	}
@@ -345,6 +415,26 @@ func (cc *ClientConn) Close() {
 func (ph *ProxyHandler) UnregisterProxy(name string) error {
 	ph.mu.Lock()
 	defer ph.mu.Unlock()
+
+	cfg, exists := ph.proxies[name]
+	if !exists {
+		return fmt.Errorf("proxy %s not found", name)
+	}
+
+	// Stop local SOCKS5 proxy if running
+	if cfg.Type == "socks5" {
+		ph.listenersMu.Lock()
+		if lp, ok := ph.localListeners[name]; ok {
+			if lp.closed.CompareAndSwap(false, true) {
+				close(lp.stopCh)
+				if p, ok := lp.proxy.(*proxy.SOCKS5Proxy); ok {
+					p.Close()
+				}
+			}
+			delete(ph.localListeners, name)
+		}
+		ph.listenersMu.Unlock()
+	}
 
 	delete(ph.proxies, name)
 

@@ -74,13 +74,15 @@ func runConfigInit() {
 
 // Server represents the RedPivot server
 type Server struct {
-	cfg         *config.ServerConfig
-	logger      *utils.Logger
-	auth        *auth.CompositeAuth
-	obfuscator  *countermeasure.Obfuscator
-	httpServer  *http.Server
-	proxyMgr    *server.ProxyManager
-	mu          sync.RWMutex
+	cfg          *config.ServerConfig
+	logger       *utils.Logger
+	auth         *auth.CompositeAuth
+	obfuscator   *countermeasure.Obfuscator
+	fallback     *auth.FallbackHandler
+	portKnock    *auth.PortKnock
+	httpServer   *http.Server
+	proxyMgr     *server.ProxyManager
+	mu           sync.RWMutex
 }
 
 func main() {
@@ -137,12 +139,41 @@ func main() {
 		utils.String("bind", cfg.Server.Bind),
 	)
 
+	// Initialize active defense components
+	fallback := auth.NewFallbackHandler(cfg.ActiveDefense.Fallback.TargetURL, logger)
+
+	// Convert config.PortKnockConfig to auth.PortKnockConfig
+	portKnockConfig := &auth.PortKnockConfig{
+		Enabled:   cfg.ActiveDefense.PortKnock.Enabled,
+		Secret:    cfg.ActiveDefense.PortKnock.Secret,
+		TTL:       cfg.ActiveDefense.PortKnock.TTL,
+		ReplayTTL: cfg.ActiveDefense.PortKnock.ReplayTTL,
+	}
+	portKnock, err := auth.NewPortKnock(portKnockConfig, logger)
+	if err != nil {
+		logger.Fatal("Failed to initialize port knock", utils.Err(err))
+	}
+
+	// Log active defense status
+	if cfg.ActiveDefense.Fallback.Enabled {
+		logger.Info("Fallback handler enabled",
+			utils.String("target_url", cfg.ActiveDefense.Fallback.TargetURL),
+		)
+	}
+	if portKnock.IsEnabled() {
+		logger.Info("Port knock enabled",
+			utils.Duration("ttl", cfg.ActiveDefense.PortKnock.TTL),
+		)
+	}
+
 	// Initialize server
 	srv := &Server{
 		cfg:        cfg,
 		logger:     logger,
 		auth:       auth.NewCompositeAuth(auth.NewTokenAuth(cfg.Auth.Tokens), auth.NewRateLimiter(10, 60, 300)),
 		obfuscator: countermeasure.NewObfuscator(cfg.Obfuscation.Enabled, cfg.Obfuscation.PaddingProbability, cfg.Obfuscation.TimingJitterMs, cfg.Obfuscation.ChunkMinSize, cfg.Obfuscation.ChunkMaxSize),
+		fallback:   fallback,
+		portKnock:  portKnock,
 	}
 
 	if err := srv.Start(); err != nil {
@@ -186,6 +217,24 @@ func (s *Server) Start() error {
 
 	// Set up handlers
 	http.Handle(s.cfg.Transport.WebSocket.Path, wsUpgrader)
+
+	// Catch-all handler for unauthorized paths (uses fallback if configured)
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Log the request
+		s.logger.Debug("HTTP request",
+			utils.String("path", r.URL.Path),
+			utils.String("method", r.Method),
+			utils.String("remote_addr", r.RemoteAddr),
+		)
+
+		// Use fallback handler for unauthorized paths
+		if s.fallback.IsEnabled() {
+			s.fallback.ServeHTTP(w, r)
+		} else {
+			http.Error(w, "Not Found", http.StatusNotFound)
+		}
+	})
+
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
@@ -229,7 +278,18 @@ func (s *Server) Stop() {
 func (s *Server) handleConnection(ws *transport.WebSocketTransport) {
 	defer ws.Close()
 
-	s.logger.Debug("New connection established")
+	remoteAddr := ws.RemoteAddr().String()
+	s.logger.Debug("New connection established", utils.String("remote_addr", remoteAddr))
+
+	// Check port knock whitelist if enabled
+	if s.portKnock.IsEnabled() && !s.portKnock.IsWhitelisted(remoteAddr) {
+		s.logger.Warn("Connection rejected: IP not whitelisted by port knock",
+			utils.String("remote_addr", remoteAddr),
+		)
+		// Send rejection and close
+		ws.WriteMessage([]byte("access denied: port knock required"))
+		return
+	}
 
 	// Wrap WebSocket as ReadWriteCloser
 	rwc := transport.NewWSReadWriteCloser(ws)
@@ -248,9 +308,12 @@ func (s *Server) handleConnection(ws *transport.WebSocketTransport) {
 
 	// Validate token
 	token := string(authFrame.Payload)
-	authInfo, err := s.auth.Authenticate("unknown", []byte(token))
+	authInfo, err := s.auth.Authenticate(remoteAddr, []byte(token))
 	if err != nil {
-		s.logger.Warn("Authentication failed", utils.String("token", token[:min(8, len(token))]+"..."))
+		s.logger.Warn("Authentication failed",
+			utils.String("remote_addr", remoteAddr),
+			utils.String("token", token[:min(8, len(token))]+"..."),
+		)
 		// Send auth failure response
 		resp := protocol.NewFrame(protocol.FrameAuthResp, 0, []byte("authentication failed"))
 		rwc.Write(resp.Encode())
@@ -272,7 +335,7 @@ func (s *Server) handleConnection(ws *transport.WebSocketTransport) {
 		return
 	}
 
-	s.logger.Info("Client authenticated")
+	s.logger.Info("Client authenticated", utils.String("remote_addr", remoteAddr))
 
 	// Create encrypted connection with session key
 	crypto, err := tunnel.NewCryptoLayer(sessionKey)
@@ -305,7 +368,7 @@ func (s *Server) handleConnection(ws *transport.WebSocketTransport) {
 
 	// Keep connection alive
 	<-mux.Done()
-	s.logger.Debug("Connection closed")
+	s.logger.Debug("Connection closed", utils.String("remote_addr", remoteAddr))
 }
 
 // handleStream handles a new multiplexed stream

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -29,6 +30,7 @@ type WebSocketTransport struct {
 	closeMu       sync.Mutex
 	onClose       func()
 	messageBuffer int
+	remoteAddr    string
 }
 
 // WSConfig contains WebSocket configuration
@@ -77,7 +79,13 @@ func NewWebSocketClient(config *WSConfig) (*WebSocketTransport, error) {
 		Subprotocols:     []string{"redpivot-1"},
 	}
 
-	conn, _, err := dialer.Dial(config.URL, config.Header)
+	// Use provided headers or create default ones
+	headers := config.Header
+	if headers == nil {
+		headers = make(http.Header)
+	}
+
+	conn, _, err := dialer.Dial(config.URL, headers)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrDialFailed, err)
 	}
@@ -98,6 +106,7 @@ func NewWebSocketServer(conn *websocket.Conn) *WebSocketTransport {
 	return &WebSocketTransport{
 		conn:          conn,
 		messageBuffer: 256,
+		remoteAddr:    conn.RemoteAddr().String(),
 	}
 }
 
@@ -226,6 +235,26 @@ func (t *WebSocketTransport) OnClose(callback func()) {
 // IsClosed returns whether the connection is closed
 func (t *WebSocketTransport) IsClosed() bool {
 	return t.isClosed()
+}
+
+// RemoteAddr returns the remote address
+func (t *WebSocketTransport) RemoteAddr() net.Addr {
+	if t.conn != nil {
+		return t.conn.RemoteAddr()
+	}
+	return nil
+}
+
+// WriteMessage writes a text message to the WebSocket
+func (t *WebSocketTransport) WriteMessage(data []byte) error {
+	t.writeMu.Lock()
+	defer t.writeMu.Unlock()
+
+	if t.isClosed() {
+		return ErrConnectionClosed
+	}
+
+	return t.conn.WriteMessage(websocket.TextMessage, data)
 }
 
 func (t *WebSocketTransport) isClosed() bool {
