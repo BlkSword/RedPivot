@@ -43,6 +43,10 @@ bash scripts/build.sh
 
 ### 交互式配置生成
 
+交互式配置向导现已支持所有高级功能，包括：
+- **服务端**：Active Defense（Fallback URL、Port Knocking）、Key Rotation、DGA Heartbeat、Frame Randomization
+- **客户端**：HTTP Appearance（浏览器 UA 池、自定义 Header）、SOCKS5 正向/反向代理
+
 ```bash
 # 服务端配置向导
 ./bin/redd config init

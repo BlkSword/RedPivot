@@ -16,7 +16,7 @@ func RunClientWizard() (*config.ClientConfig, string, error) {
 	w.PrintHeader("RedPivot 客户端配置向导")
 
 	// Step 1: Server Connection
-	w.PrintStep(1, 4, "服务器连接")
+	w.PrintStep(1, 5, "服务器连接")
 
 	serverURL, err := w.ValidateWithRetry(
 		"服务器地址 (例如 wss://server:443/ws)",
@@ -74,8 +74,74 @@ func RunClientWizard() (*config.ClientConfig, string, error) {
 		cfg.Client.Reconnect.MaxDelay = time.Duration(maxDelay) * time.Millisecond
 	}
 
-	// Step 2: Proxy Configuration
-	w.PrintStep(2, 4, "代理配置")
+	// Step 2: HTTP Appearance
+	w.PrintStep(2, 5, "HTTP 外观伪装")
+
+	enableHTTPAppearance, err := w.Confirm("启用 HTTP 外观伪装", false)
+	if err != nil {
+		return nil, "", err
+	}
+	cfg.Client.HttpAppearance.Enabled = enableHTTPAppearance
+
+	if enableHTTPAppearance {
+		// Browser type selection
+		browserTypes := []string{"chrome", "firefox", "safari", "edge", "any"}
+		browserDescriptions := []string{
+			"Chrome 浏览器",
+			"Firefox 浏览器",
+			"Safari 浏览器",
+			"Edge 浏览器",
+			"随机浏览器",
+		}
+		w.Println("  选择浏览器类型:")
+		for i, desc := range browserDescriptions {
+			w.Println("    %d: %s", i+1, desc)
+		}
+		browserIdx, err := w.Select("浏览器", browserTypes, 0)
+		if err != nil {
+			return nil, "", err
+		}
+		cfg.Client.HttpAppearance.Browser = browserTypes[browserIdx]
+
+		// Custom User-Agent (optional)
+		customUA, err := w.ReadLine("自定义 User-Agent (留空使用浏览器池)", "")
+		if err != nil {
+			return nil, "", err
+		}
+		if customUA != "" {
+			cfg.Client.HttpAppearance.UserAgent = customUA
+		}
+
+		// Custom URI template (optional)
+		uriTemplate, err := w.ReadLine("URI 路径模板 (留空使用默认)", "")
+		if err != nil {
+			return nil, "", err
+		}
+		if uriTemplate != "" {
+			cfg.Client.HttpAppearance.UriTemplate = uriTemplate
+		}
+
+		// Extra headers
+		w.Println("  额外 HTTP 头 (可选，格式: Name:Value，留空跳过)")
+		cfg.Client.HttpAppearance.ExtraHeaders = make(map[string]string)
+		for {
+			headerName, err := w.ReadLine("  头部名称", "")
+			if err != nil {
+				return nil, "", err
+			}
+			if headerName == "" {
+				break
+			}
+			headerValue, err := w.ReadLine("  头部值", "")
+			if err != nil {
+				return nil, "", err
+			}
+			cfg.Client.HttpAppearance.ExtraHeaders[headerName] = headerValue
+		}
+	}
+
+	// Step 3: Proxy Configuration
+	w.PrintStep(3, 5, "代理配置")
 
 	proxies := []config.ProxyConfig{}
 	proxyNum := 0
@@ -114,8 +180,8 @@ func RunClientWizard() (*config.ClientConfig, string, error) {
 
 	cfg.Proxies = proxies
 
-	// Step 3: Logging
-	w.PrintStep(3, 4, "日志设置")
+	// Step 4: Logging
+	w.PrintStep(4, 5, "日志设置")
 
 	logLevels := []string{"debug", "info", "warn", "error"}
 	logLevelIdx, err := w.Select("日志级别", logLevels, 1) // Default to info
@@ -137,8 +203,8 @@ func RunClientWizard() (*config.ClientConfig, string, error) {
 	}
 	cfg.Logging.Output = output
 
-	// Step 4: Confirm and Save
-	w.PrintStep(4, 4, "确认与保存")
+	// Step 5: Confirm and Save
+	w.PrintStep(5, 5, "确认与保存")
 
 	// Preview
 	if err := w.Preview("redctl.yaml", cfg); err != nil {
