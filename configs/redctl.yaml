@@ -7,6 +7,8 @@ client:
   server: "wss://your-server.com:443/ws"
   # Authentication token
   token: "your-secret-token-here-change-me"
+  # Skip TLS certificate verification (not recommended for production)
+  insecure_skip_verify: false
 
   # Reconnection settings
   reconnect:
@@ -16,6 +18,7 @@ client:
     max_delay: 60s
 
   # HTTP Appearance - Traffic camouflage to mimic browser traffic
+  # This helps avoid detection by making traffic look like normal HTTPS
   http_appearance:
     enabled: true
     # Browser type for random UA: chrome, firefox, safari, edge, any
@@ -24,9 +27,10 @@ client:
     # user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     # Custom HTTP headers to add
     extra_headers:
-      "Accept": "*/*"
-      "Accept-Language": "en-US,en;q=0.9"
-      "Cache-Control": "no-cache"
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+      Accept-Language: "en-US,en;q=0.9"
+      Cache-Control: "max-age=0"
+      Connection: "keep-alive"
     # URI template for WebSocket path (optional)
     # uri_template: "/api/v1/stream"
 
@@ -34,6 +38,10 @@ client:
 # Each proxy exposes a local service through the tunnel
 
 proxies:
+  # ===========================================
+  # TCP Proxies - Raw TCP port forwarding
+  # ===========================================
+
   # TCP Proxy - Expose SSH server
   - name: "ssh"
     type: "tcp"
@@ -46,6 +54,16 @@ proxies:
     local: "127.0.0.1:3389"
     remote_port: 6389
 
+  # UDP Proxy - Expose DNS server
+  - name: "dns"
+    type: "udp"
+    local: "127.0.0.1:53"
+    remote_port: 6053
+
+  # ===========================================
+  # HTTP Proxies - Web application exposure
+  # ===========================================
+
   # HTTP Proxy - Expose web application with subdomain
   - name: "webapp"
     type: "http"
@@ -53,23 +71,11 @@ proxies:
     subdomain: "myapp"
     # Accessible at: myapp.example.com
 
-  # HTTP Proxy - Expose another web service
+  # HTTP Proxy - Expose API service
   - name: "api"
     type: "http"
     local: "127.0.0.1:3000"
     subdomain: "api"
-
-  # UDP Proxy - Expose DNS server
-  - name: "dns"
-    type: "udp"
-    local: "127.0.0.1:53"
-    remote_port: 6053
-
-  # Secret TCP (STCP) - Requires visitor on another client
-  # - name: "secret-service"
-  #   type: "stcp"
-  #   local: "127.0.0.1:9000"
-  #   secret_key: "shared-secret-key"
 
   # HTTPS Proxy - TLS termination with custom certificate
   # - name: "secure-web"
@@ -78,6 +84,36 @@ proxies:
   #   subdomain: "secure"
   #   cert_file: "/etc/redctl/cert.pem"
   #   key_file: "/etc/redctl/key.pem"
+
+  # ===========================================
+  # SOCKS5 Proxies - Dynamic proxy support
+  # ===========================================
+
+  # SOCKS5 Forward Proxy - Client-side SOCKS5 server
+  # Traffic flows: Tool -> Client SOCKS5 -> Tunnel -> Server -> Target
+  - name: "socks5-proxy"
+    type: "socks5"
+    local: "127.0.0.1:1080"
+    # remote_port is optional - server can auto-assign
+    # remote_port: 7580
+
+  # SOCKS5 Reverse Proxy - Server-side SOCKS5 server
+  # Traffic flows: Tool -> Server SOCKS5 -> Tunnel -> Client -> Target
+  - name: "rsocks5-proxy"
+    type: "rsocks5"
+    local: "127.0.0.1:1080"
+    remote_port: 7580  # Required for rsocks5
+
+  # ===========================================
+  # Secure TCP (STCP) - Key-protected TCP
+  # ===========================================
+
+  # STCP Proxy - Requires secret key for access
+  # - name: "secret-service"
+  #   type: "stcp"
+  #   local: "127.0.0.1:9000"
+  #   remote_port: 6900
+  #   secret_key: "shared-secret-key"
 
 # Logging configuration
 logging:

@@ -87,17 +87,11 @@ func MemzeroString(s string) {
 	if len(s) == 0 {
 		return
 	}
-	// Access the underlying bytes of the string
-	header := (*struct {
-		data unsafe.Pointer
-		len  int
-	})(unsafe.Pointer(&s))
-
-	// Zero the memory
-	ptr := uintptr(header.data)
-	for i := 0; i < header.len; i++ {
-		*(*byte)(unsafe.Pointer(ptr + uintptr(i))) = 0
-	}
+	// Access the underlying bytes of the string using unsafe.Slice (Go 1.17+)
+	// This is safer than direct pointer arithmetic
+	ptr := unsafe.StringData(s)
+	sl := unsafe.Slice(ptr, len(s))
+	Memzero(sl)
 }
 
 // SecureConfig holds configuration with memory protection

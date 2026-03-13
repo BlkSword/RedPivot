@@ -1,10 +1,10 @@
 # redd - RedPivot Server Configuration
-# High-performance reverse proxy with anti-traffic-analysis features
+# High-performance reverse proxy with five-layer security architecture
 
 server:
   # Server bind address
   bind: "0.0.0.0:443"
-  # Domain for HTTP proxies
+  # Domain for HTTP/HTTPS proxies
   domain: "example.com"
   # Connection timeouts in seconds
   read_timeout: 30
@@ -19,7 +19,27 @@ auth:
     - "your-secret-token-here-change-me"
     - "another-token-for-different-client"
 
-# Transport layer configuration
+# Active defense mechanisms (Layer 5)
+active_defense:
+  # Fallback URL - redirect unauthorized requests
+  fallback:
+    enabled: false
+    # Target URL to redirect unauthorized requests
+    target_url: "https://www.bing.com"
+    # If true, only log without redirecting
+    log_only: false
+
+  # Port Knocking / SPA (Single Packet Authorization)
+  port_knock:
+    enabled: false
+    # HMAC secret key (base64 encoded)
+    secret: "dXNlci1kZWZpbmVkLXNlY3JldC1iYXNlNjQ="
+    # How long a knock is valid
+    ttl: 5m
+    # Replay protection window
+    replay_ttl: 10m
+
+# Transport layer configuration (Layer 1)
 transport:
   # Transport type: "websocket", "quic", "grpc"
   type: "websocket"
@@ -44,7 +64,7 @@ transport:
     max_idle_timeout: 60
     keep_alive_period: 15
 
-# Anti-traffic-analysis obfuscation settings
+# Anti-traffic-analysis obfuscation settings (Layer 2 & 3)
 obfuscation:
   enabled: true
   # Probability of adding random padding (0.0 - 1.0)
@@ -54,6 +74,45 @@ obfuscation:
   # Chunk size range for traffic normalization
   chunk_min_size: 64
   chunk_max_size: 1500
+
+  # Key Rotation - periodically rotate session keys
+  key_rotation:
+    enabled: false
+    # Rotation interval
+    interval: 30m
+    # Grace period for old key acceptance
+    grace_period: 5m
+    # Number of old keys to keep
+    key_history_size: 3
+    # Notify client on key rotation
+    rotation_notify: true
+
+  # DGA Heartbeat - dynamic heartbeat intervals using DGA algorithm
+  dga_heartbeat:
+    enabled: false
+    # DGA seed (base64 encoded)
+    seed: "Z2EtaGVhcnRiZWF0LXNlZWQ="
+    # Base heartbeat interval
+    interval: 30s
+    # Maximum jitter
+    jitter_max: 10s
+    # Enable adaptive adjustment based on traffic
+    adaptive: false
+    # Adaptive interval range
+    min_interval: 15s
+    max_interval: 60s
+
+  # Frame Randomization - randomize frame size and timing
+  frame_randomization:
+    enabled: true
+    # Padding bytes range
+    min_padding: 4
+    max_padding: 128
+    # Timing jitter range (milliseconds)
+    timing_jitter_min_ms: 0
+    timing_jitter_max_ms: 50
+    # Enable size randomization
+    size_randomization: true
 
 # Logging configuration
 logging:

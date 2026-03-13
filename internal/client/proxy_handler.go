@@ -46,15 +46,15 @@ type ProxyHandler struct {
 	logger       *utils.Logger
 
 	// Local proxy listeners (for SOCKS5, etc.)
-	localListeners map[string]localProxy
+	localListeners map[string]*localProxy
 	listenersMu    sync.RWMutex
 }
 
 // localProxy represents a locally running proxy
 type localProxy struct {
-	proxy   interface{} // *proxy.SOCKS5Proxy or similar
-	closed  atomic.Bool
-	stopCh  chan struct{}
+	proxy  interface{} // *proxy.SOCKS5Proxy or similar
+	closed *atomic.Bool
+	stopCh chan struct{}
 }
 
 // NewProxyHandler creates a new proxy handler
@@ -64,7 +64,7 @@ func NewProxyHandler(streamOpener StreamOpener, logger *utils.Logger) *ProxyHand
 		proxies:        make(map[string]*config.ProxyConfig),
 		conns:          make(map[uint32]*ClientConn),
 		logger:         logger,
-		localListeners: make(map[string]localProxy),
+		localListeners: make(map[string]*localProxy),
 	}
 }
 
@@ -151,9 +151,9 @@ func (ph *ProxyHandler) startLocalSOCKS5(cfg *config.ProxyConfig) error {
 		return err
 	}
 
-	lp := localProxy{
+	lp := &localProxy{
 		proxy:  socks5Proxy,
-		closed: atomic.Bool{},
+		closed: &atomic.Bool{},
 		stopCh: make(chan struct{}),
 	}
 
