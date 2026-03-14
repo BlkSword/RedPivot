@@ -579,7 +579,3 @@ RedPivot/
 - 安全日志自动清理
 
 ---
-
-## License
-
-MIT License
